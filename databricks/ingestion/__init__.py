@@ -1,19 +1,9 @@
 """
-Data ingestion utilities for Boston Reliability Engine.
-Handles API calls and S3 writes for DLT Auto Loader consumption.
-"""
-from databricks.ingestion.s3_writer import (
-    ingest_mbta_predictions,
-    ingest_mbta_schedules,
-    ingest_noaa_weather,
-    ingest_driving_routes,
-    ingest_all_sources
-)
+Data ingestion module for Boston Reliability Engine.
 
-__all__ = [
-    "ingest_mbta_predictions",
-    "ingest_mbta_schedules",
-    "ingest_noaa_weather",
-    "ingest_driving_routes",
-    "ingest_all_sources"
-]
+This module contains the Databricks notebook for ingesting data from external APIs
+(MBTA, NOAA, Google Maps) and writing to Databricks Volume for DLT Auto Loader consumption.
+
+Main file:
+    - boston_reliability_ingestion.py: Databricks notebook for API ingestion
+"""

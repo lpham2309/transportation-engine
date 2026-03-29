@@ -1,0 +1,440 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Boston Reliability Engine - Data Ingestion
+# MAGIC
+# MAGIC This notebook fetches data from external APIs and writes to Databricks Volume for DLT processing.
+# MAGIC
+# MAGIC **Schedule:** Run via Databricks Workflows before DLT pipeline
+# MAGIC
+# MAGIC **Data Sources:**
+# MAGIC - MBTA API (predictions, schedules)
+# MAGIC - NOAA API (weather)
+# MAGIC - Google Maps API (driving routes)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Configuration
+
+# COMMAND ----------
+
+import os
+import json
+import requests
+import h3
+from datetime import datetime, timedelta
+
+# Get secrets from Databricks secret scope
+MBTA_API_KEY = dbutils.secrets.get(scope="boston-reliability", key="mbta-api-key")
+NOAA_API_TOKEN = dbutils.secrets.get(scope="boston-reliability", key="noaa-api-token")
+GOOGLE_MAPS_API_KEY = dbutils.secrets.get(scope="boston-reliability", key="google-maps-api-key")
+
+# Databricks Volume Configuration
+VOLUME_PATH = "/Volumes/bootcamp_students/zachy_lam_pham3110/boston-reliability-engine"
+RAW_BASE_PATH = f"{VOLUME_PATH}/raw"
+
+# API Endpoints
+MBTA_API_BASE_URL = "https://api-v3.mbta.com"
+NOAA_API_BASE_URL = "https://www.ncdc.noaa.gov/cdo-web/api/v2"
+
+# Boston Logan Airport station ID for NOAA
+BOSTON_STATION_ID = "GHCND:USW00014739"
+
+# MBTA Routes to track
+MBTA_ROUTES = ["Red", "Orange", "Green-B", "Green-C", "Green-D", "Green-E", "Blue", "741", "742", "743"]
+
+# Get execution date from widget or default to today
+dbutils.widgets.text("execution_date", datetime.now().strftime("%Y-%m-%d"))
+EXECUTION_DATE = dbutils.widgets.get("execution_date")
+
+print(f"Ingesting data for: {EXECUTION_DATE}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Helper Functions
+
+# COMMAND ----------
+
+def write_to_volume(records: list, prefix: str, partition_date: str):
+    """Write records to Databricks Volume as newline-delimited JSON (NDJSON)."""
+    if not records:
+        print(f"No records to write for {prefix}")
+        return None
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    path = f"{RAW_BASE_PATH}/{prefix}/{partition_date}/{timestamp}.json"
+
+    # Convert to NDJSON
+    ndjson_content = "\n".join(json.dumps(record, default=str) for record in records)
+
+    # Write using dbutils
+    dbutils.fs.put(path, ndjson_content, overwrite=True)
+
+    print(f"Wrote {len(records)} records to {path}")
+    return path
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MBTA Predictions
+
+# COMMAND ----------
+
+def ingest_mbta_predictions(execution_date: str) -> dict:
+    """Fetch MBTA real-time predictions and write to Volume."""
+    print(f"\n{'='*60}")
+    print(f"INGESTING MBTA PREDICTIONS FOR {execution_date}")
+    print(f"{'='*60}")
+
+    url = f"{MBTA_API_BASE_URL}/predictions"
+    params = {
+        "page[limit]": 500,
+        "filter[route]": ",".join(MBTA_ROUTES),
+        "include": "stop,route,trip",
+        "sort": "-arrival_time"
+    }
+    if MBTA_API_KEY:
+        params["api_key"] = MBTA_API_KEY
+
+    print("Fetching predictions from MBTA API...")
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    predictions = data.get("data", [])
+    included = {item["id"]: item for item in data.get("included", [])}
+    print(f"Fetched {len(predictions)} predictions")
+
+    # Process predictions with H3 enrichment
+    records = []
+    for pred in predictions:
+        attrs = pred.get("attributes", {})
+        rels = pred.get("relationships", {})
+
+        stop_id = rels.get("stop", {}).get("data", {}).get("id")
+        stop_data = included.get(stop_id, {}).get("attributes", {})
+        route_id = rels.get("route", {}).get("data", {}).get("id")
+        route_data = included.get(route_id, {}).get("attributes", {})
+
+        lat = stop_data.get("latitude")
+        lon = stop_data.get("longitude")
+        h3_index = h3.latlng_to_cell(lat, lon, 8) if lat and lon else None
+
+        records.append({
+            "prediction_id": pred.get("id"),
+            "arrival_time": attrs.get("arrival_time"),
+            "departure_time": attrs.get("departure_time"),
+            "direction_id": attrs.get("direction_id"),
+            "schedule_relationship": attrs.get("schedule_relationship"),
+            "status": attrs.get("status"),
+            "stop_id": stop_id,
+            "stop_name": stop_data.get("name"),
+            "stop_latitude": lat,
+            "stop_longitude": lon,
+            "stop_h3_index": h3_index,
+            "route_id": route_id,
+            "route_long_name": route_data.get("long_name"),
+            "route_type": route_data.get("type"),
+            "trip_id": rels.get("trip", {}).get("data", {}).get("id"),
+            "fetched_at": datetime.utcnow().isoformat(),
+            "fetched_date": execution_date
+        })
+
+    volume_path = write_to_volume(records, "mbta_predictions", execution_date)
+    return {"records": len(records), "volume_path": volume_path}
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## MBTA Schedules
+
+# COMMAND ----------
+
+def ingest_mbta_schedules(execution_date: str) -> dict:
+    """Fetch MBTA scheduled arrivals and write to Volume."""
+    print(f"\n{'='*60}")
+    print(f"INGESTING MBTA SCHEDULES FOR {execution_date}")
+    print(f"{'='*60}")
+
+    url = f"{MBTA_API_BASE_URL}/schedules"
+    params = {
+        "page[limit]": 500,
+        "filter[date]": execution_date,
+        "filter[route]": ",".join(MBTA_ROUTES),
+        "include": "stop,route,trip",
+        "sort": "arrival_time"
+    }
+    if MBTA_API_KEY:
+        params["api_key"] = MBTA_API_KEY
+
+    print("Fetching schedules from MBTA API...")
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    schedules = data.get("data", [])
+    included = {item["id"]: item for item in data.get("included", [])}
+    print(f"Fetched {len(schedules)} schedules")
+
+    records = []
+    for sched in schedules:
+        attrs = sched.get("attributes", {})
+        rels = sched.get("relationships", {})
+
+        stop_id = rels.get("stop", {}).get("data", {}).get("id")
+        stop_data = included.get(stop_id, {}).get("attributes", {})
+        route_id = rels.get("route", {}).get("data", {}).get("id")
+        route_data = included.get(route_id, {}).get("attributes", {})
+
+        lat = stop_data.get("latitude")
+        lon = stop_data.get("longitude")
+        h3_index = h3.latlng_to_cell(lat, lon, 8) if lat and lon else None
+
+        records.append({
+            "schedule_id": sched.get("id"),
+            "arrival_time": attrs.get("arrival_time"),
+            "departure_time": attrs.get("departure_time"),
+            "direction_id": attrs.get("direction_id"),
+            "drop_off_type": attrs.get("drop_off_type"),
+            "pickup_type": attrs.get("pickup_type"),
+            "stop_sequence": attrs.get("stop_sequence"),
+            "timepoint": attrs.get("timepoint"),
+            "stop_id": stop_id,
+            "stop_name": stop_data.get("name"),
+            "stop_latitude": lat,
+            "stop_longitude": lon,
+            "stop_h3_index": h3_index,
+            "route_id": route_id,
+            "route_long_name": route_data.get("long_name"),
+            "route_type": route_data.get("type"),
+            "trip_id": rels.get("trip", {}).get("data", {}).get("id"),
+            "schedule_date": execution_date,
+            "fetched_at": datetime.utcnow().isoformat()
+        })
+
+    volume_path = write_to_volume(records, "mbta_schedules", execution_date)
+    return {"records": len(records), "volume_path": volume_path}
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## NOAA Weather
+
+# COMMAND ----------
+
+def ingest_noaa_weather(execution_date: str) -> dict:
+    """Fetch NOAA weather data for Boston and write to Volume."""
+    print(f"\n{'='*60}")
+    print(f"INGESTING NOAA WEATHER FOR {execution_date}")
+    print(f"{'='*60}")
+
+    if not NOAA_API_TOKEN:
+        print("WARNING: NOAA_API_TOKEN not set, skipping weather ingestion")
+        return {"records": 0, "skipped": True}
+
+    url = f"{NOAA_API_BASE_URL}/data"
+    headers = {"token": NOAA_API_TOKEN}
+    params = {
+        "datasetid": "GHCND",
+        "stationid": BOSTON_STATION_ID,
+        "startdate": execution_date,
+        "enddate": execution_date,
+        "datatypeid": "PRCP,TMAX,TMIN,SNOW,SNWD,AWND",
+        "units": "standard",
+        "limit": 1000
+    }
+
+    print("Fetching weather data from NOAA API...")
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    results = data.get("results", [])
+    print(f"Fetched {len(results)} observations")
+
+    # Aggregate into single record per date
+    weather_record = {
+        "observation_date": execution_date,
+        "station_id": BOSTON_STATION_ID,
+        "station_name": "Boston Logan Airport",
+        "precipitation_inches": None,
+        "temp_max_f": None,
+        "temp_min_f": None,
+        "snow_inches": None,
+        "snow_depth_inches": None,
+        "wind_speed_mph": None,
+        "weather_condition": None,
+        "fetched_at": datetime.utcnow().isoformat()
+    }
+
+    for obs in results:
+        datatype = obs.get("datatype")
+        value = obs.get("value")
+
+        if datatype == "PRCP":
+            weather_record["precipitation_inches"] = value
+        elif datatype == "TMAX":
+            weather_record["temp_max_f"] = value
+        elif datatype == "TMIN":
+            weather_record["temp_min_f"] = value
+        elif datatype == "SNOW":
+            weather_record["snow_inches"] = value
+        elif datatype == "SNWD":
+            weather_record["snow_depth_inches"] = value
+        elif datatype == "AWND":
+            weather_record["wind_speed_mph"] = value
+
+    # Categorize weather condition
+    precip = weather_record["precipitation_inches"] or 0
+    snow = weather_record["snow_inches"] or 0
+
+    if snow > 0:
+        weather_record["weather_condition"] = "snow"
+    elif precip > 0.1:
+        weather_record["weather_condition"] = "rain"
+    else:
+        weather_record["weather_condition"] = "clear"
+
+    volume_path = write_to_volume([weather_record], "noaa_weather", execution_date)
+    return {"records": 1, "volume_path": volume_path}
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Driving Routes
+# MAGIC
+# MAGIC Loads routes from Volume config (set via Routes API) and fetches driving times.
+
+# COMMAND ----------
+
+def load_driving_routes() -> list:
+    """Load driving routes from Volume configuration."""
+    config_path = f"{VOLUME_PATH}/config/driving_routes.json"
+
+    try:
+        content = dbutils.fs.head(config_path, 1000000)
+        data = json.loads(content)
+        routes = [r for r in data.get("routes", []) if r.get("is_active", True)]
+        print(f"Loaded {len(routes)} routes from config")
+        return routes
+    except Exception as e:
+        print(f"No routes config found, using defaults: {e}")
+        # Default routes
+        return [
+            {
+                "name": "Cambridge to Financial District",
+                "origin": {"latitude": 42.3601, "longitude": -71.0589},
+                "destination": {"latitude": 42.3554, "longitude": -71.0603}
+            },
+            {
+                "name": "Harvard to Back Bay",
+                "origin": {"latitude": 42.3736, "longitude": -71.1097},
+                "destination": {"latitude": 42.3601, "longitude": -71.0589}
+            }
+        ]
+
+def ingest_driving_routes(execution_date: str) -> dict:
+    """Fetch Google Maps driving times for configured routes."""
+    print(f"\n{'='*60}")
+    print(f"INGESTING DRIVING ROUTES FOR {execution_date}")
+    print(f"{'='*60}")
+
+    if not GOOGLE_MAPS_API_KEY:
+        print("WARNING: GOOGLE_MAPS_API_KEY not set, skipping driving ingestion")
+        return {"records": 0, "skipped": True}
+
+    import googlemaps
+    gmaps = googlemaps.Client(key=GOOGLE_MAPS_API_KEY)
+
+    routes = load_driving_routes()
+    print(f"Processing {len(routes)} routes")
+
+    records = []
+    for route in routes:
+        route_name = route["name"]
+        origin = route.get("origin", {})
+        destination = route.get("destination", {})
+
+        orig_lat = origin.get("latitude")
+        orig_lon = origin.get("longitude")
+        dest_lat = destination.get("latitude")
+        dest_lon = destination.get("longitude")
+
+        if not all([orig_lat, orig_lon, dest_lat, dest_lon]):
+            print(f"Skipping {route_name}: missing coordinates")
+            continue
+
+        print(f"Fetching route: {route_name}")
+
+        try:
+            departure_time = datetime.strptime(execution_date, "%Y-%m-%d").replace(hour=8, minute=0)
+
+            result = gmaps.directions(
+                origin=(orig_lat, orig_lon),
+                destination=(dest_lat, dest_lon),
+                mode="driving",
+                departure_time=departure_time,
+                traffic_model="best_guess"
+            )
+
+            if result:
+                leg = result[0]["legs"][0]
+                duration_in_traffic = leg.get("duration_in_traffic", {}).get("value")
+
+                records.append({
+                    "route_name": route_name,
+                    "origin_address": origin.get("formatted_address"),
+                    "origin_latitude": orig_lat,
+                    "origin_longitude": orig_lon,
+                    "origin_h3_index": h3.latlng_to_cell(orig_lat, orig_lon, 8),
+                    "destination_address": destination.get("formatted_address"),
+                    "destination_latitude": dest_lat,
+                    "destination_longitude": dest_lon,
+                    "destination_h3_index": h3.latlng_to_cell(dest_lat, dest_lon, 8),
+                    "distance_meters": leg.get("distance", {}).get("value"),
+                    "duration_seconds": leg.get("duration", {}).get("value"),
+                    "duration_in_traffic_seconds": duration_in_traffic,
+                    "departure_time": departure_time.isoformat(),
+                    "fetched_date": execution_date,
+                    "fetched_at": datetime.utcnow().isoformat()
+                })
+        except Exception as e:
+            print(f"Error fetching route {route_name}: {e}")
+            continue
+
+    volume_path = write_to_volume(records, "driving_routes", execution_date)
+    return {"records": len(records), "volume_path": volume_path}
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Run All Ingestion
+
+# COMMAND ----------
+
+results = {}
+
+# Ingest all sources
+results["mbta_predictions"] = ingest_mbta_predictions(EXECUTION_DATE)
+results["mbta_schedules"] = ingest_mbta_schedules(EXECUTION_DATE)
+results["noaa_weather"] = ingest_noaa_weather(EXECUTION_DATE)
+results["driving_routes"] = ingest_driving_routes(EXECUTION_DATE)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Summary
+
+# COMMAND ----------
+
+print("\n" + "="*70)
+print("INGESTION COMPLETE")
+print("="*70)
+
+for source, stats in results.items():
+    status = "✓" if stats.get("records", 0) > 0 else "⚠"
+    print(f"  {status} {source}: {stats}")
+
+# Return results for workflow
+dbutils.notebook.exit(json.dumps(results))

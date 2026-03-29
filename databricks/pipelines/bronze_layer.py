@@ -3,7 +3,7 @@
 # MAGIC # Boston Reliability Engine - Bronze Layer
 # MAGIC
 # MAGIC This notebook defines Delta Live Tables for the Bronze (raw) layer.
-# MAGIC Data is ingested from S3 via Auto Loader for streaming/incremental processing.
+# MAGIC Data is ingested from Databricks Volume via Auto Loader for streaming/incremental processing.
 
 # COMMAND ----------
 
@@ -43,7 +43,7 @@ CHECKPOINT_BASE = "/checkpoints/bronze"
 @dlt.expect("valid_route_id", "route_id IS NOT NULL")
 def bronze_mbta_predictions():
     """
-    Ingests MBTA predictions from S3 using Auto Loader.
+    Ingests MBTA predictions from Volume using Auto Loader.
     Supports both streaming and batch processing.
     """
     schema = StructType([
@@ -102,7 +102,7 @@ def bronze_mbta_predictions():
 @dlt.expect("valid_route_id", "route_id IS NOT NULL")
 def bronze_mbta_schedules():
     """
-    Ingests MBTA schedules from S3 using Auto Loader.
+    Ingests MBTA schedules from Volume using Auto Loader.
     """
     schema = StructType([
         StructField("schedule_id", StringType(), False),
@@ -159,7 +159,7 @@ def bronze_mbta_schedules():
 @dlt.expect("valid_weather_condition", "weather_condition IN ('clear', 'rain', 'snow')")
 def bronze_noaa_weather():
     """
-    Ingests NOAA weather data from S3.
+    Ingests NOAA weather data from Volume.
     Daily batch processing (weather data is released daily).
     """
     schema = StructType([
@@ -208,7 +208,7 @@ def bronze_noaa_weather():
 @dlt.expect("valid_duration", "duration_seconds IS NOT NULL AND duration_seconds > 0")
 def bronze_driving_routes():
     """
-    Ingests Google Maps driving data from S3.
+    Ingests Google Maps driving data from Volume.
     """
     schema = StructType([
         StructField("route_name", StringType(), True),
