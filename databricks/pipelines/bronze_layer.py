@@ -18,8 +18,8 @@ from pyspark.sql.types import *
 
 # COMMAND ----------
 
-# S3 paths for raw data landing zone
-S3_BASE_PATH = "s3://boston-reliability-engine/raw"
+# Volume paths for raw data landing zone
+VOLUME_BASE_PATH = "/Volumes/bootcamp_students/zachy_lam_pham3110/boston-reliability-engine/raw"
 CHECKPOINT_BASE = "/checkpoints/bronze"
 
 # COMMAND ----------
@@ -73,7 +73,7 @@ def bronze_mbta_predictions():
         .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/mbta_predictions/schema")
         .option("cloudFiles.inferColumnTypes", "false")
         .schema(schema)
-        .load(f"{S3_BASE_PATH}/mbta_predictions/")
+        .load(f"{VOLUME_BASE_PATH}/mbta_predictions/")
         .withColumn("arrival_time", to_timestamp("arrival_time"))
         .withColumn("departure_time", to_timestamp("departure_time"))
         .withColumn("fetched_at", to_timestamp("fetched_at"))
@@ -133,7 +133,7 @@ def bronze_mbta_schedules():
         .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/mbta_schedules/schema")
         .option("cloudFiles.inferColumnTypes", "false")
         .schema(schema)
-        .load(f"{S3_BASE_PATH}/mbta_schedules/")
+        .load(f"{VOLUME_BASE_PATH}/mbta_schedules/")
         .withColumn("arrival_time", to_timestamp("arrival_time"))
         .withColumn("departure_time", to_timestamp("departure_time"))
         .withColumn("fetched_at", to_timestamp("fetched_at"))
@@ -183,7 +183,7 @@ def bronze_noaa_weather():
         .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/noaa_weather/schema")
         .option("cloudFiles.inferColumnTypes", "false")
         .schema(schema)
-        .load(f"{S3_BASE_PATH}/noaa_weather/")
+        .load(f"{VOLUME_BASE_PATH}/noaa_weather/")
         .withColumn("observation_date", to_date("observation_date"))
         .withColumn("fetched_at", to_timestamp("fetched_at"))
         .withColumn("_ingested_at", current_timestamp())
@@ -235,7 +235,7 @@ def bronze_driving_routes():
         .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/driving_routes/schema")
         .option("cloudFiles.inferColumnTypes", "false")
         .schema(schema)
-        .load(f"{S3_BASE_PATH}/driving_routes/")
+        .load(f"{VOLUME_BASE_PATH}/driving_routes/")
         .withColumn("departure_time", to_timestamp("departure_time"))
         .withColumn("fetched_at", to_timestamp("fetched_at"))
         .withColumn("fetched_date", to_date("fetched_date"))
