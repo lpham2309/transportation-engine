@@ -11,7 +11,7 @@
 
 # DBTITLE 1,Cell 3
 # MAGIC %md
-# MAGIC    
+# MAGIC
 # MAGIC # Boston Reliability Engine - Data Ingestion
 # MAGIC
 # MAGIC This notebook fetches data from external APIs and writes to Databricks Volume for DLT processing.
@@ -20,12 +20,16 @@
 # MAGIC
 # MAGIC **Data Sources:**
 # MAGIC - MBTA API (predictions, schedules)
-# MAGIC - NOAA API (weather)
+# MAGIC - Open-Meteo API (weather)
 # MAGIC - Google Maps API (driving routes)
 
 # COMMAND ----------
 
-# DBTITLE 1,Cell 4
+# MAGIC %md
+# MAGIC ## Configuration
+
+# COMMAND ----------
+
 import os
 import json
 import requests
@@ -34,7 +38,6 @@ from datetime import datetime, timedelta
 
 # Get secrets from Databricks secret scope
 MBTA_API_KEY = dbutils.secrets.get(scope="boston-reliability", key="mbta-api-key")
-NOAA_API_TOKEN = dbutils.secrets.get(scope="boston-reliability", key="noaa-api-token")
 GOOGLE_MAPS_API_KEY = dbutils.secrets.get(scope="boston-reliability", key="google-maps-api-key")
 
 # Databricks Volume Configuration
@@ -43,10 +46,11 @@ RAW_BASE_PATH = f"{VOLUME_PATH}/raw"
 
 # API Endpoints
 MBTA_API_BASE_URL = "https://api-v3.mbta.com"
-NOAA_API_BASE_URL = "https://www.ncdc.noaa.gov/cdo-web/api/v2"
+OPENMETEO_API_BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
-# Boston Logan Airport station ID for NOAA
-BOSTON_STATION_ID = "GHCND:USW00014739"
+# Boston coordinates for Open-Meteo
+BOSTON_LATITUDE = 42.3601
+BOSTON_LONGITUDE = -71.0589
 
 # MBTA Routes to track
 MBTA_ROUTES = ["Red", "Orange", "Green-B", "Green-C", "Green-D", "Green-E", "Blue", "741", "742", "743"]
@@ -227,84 +231,69 @@ def ingest_mbta_schedules(execution_date: str) -> dict:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## NOAA Weather
+# MAGIC ## Open-Meteo Weather
 
 # COMMAND ----------
 
-def ingest_noaa_weather(execution_date: str) -> dict:
-    """Fetch NOAA weather data for Boston and write to Volume."""
+def ingest_openmeteo_weather(execution_date: str) -> dict:
+    """Fetch Open-Meteo weather data for Boston and write to Volume."""
     print(f"\n{'='*60}")
-    print(f"INGESTING NOAA WEATHER FOR {execution_date}")
+    print(f"INGESTING OPEN-METEO WEATHER FOR {execution_date}")
     print(f"{'='*60}")
 
-    if not NOAA_API_TOKEN:
-        print("WARNING: NOAA_API_TOKEN not set, skipping weather ingestion")
-        return {"records": 0, "skipped": True}
-
-    url = f"{NOAA_API_BASE_URL}/data"
-    headers = {"token": NOAA_API_TOKEN}
     params = {
-        "datasetid": "GHCND",
-        "stationid": BOSTON_STATION_ID,
-        "startdate": execution_date,
-        "enddate": execution_date,
-        "datatypeid": "PRCP,TMAX,TMIN,SNOW,SNWD,AWND",
-        "units": "standard",
-        "limit": 1000
+        "latitude": BOSTON_LATITUDE,
+        "longitude": BOSTON_LONGITUDE,
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,wind_speed_10m_max",
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "timezone": "America/New_York",
+        "start_date": execution_date,
+        "end_date": execution_date
     }
 
-    print("Fetching weather data from NOAA API...")
-    response = requests.get(url, headers=headers, params=params, timeout=60)
+    print("Fetching weather data from Open-Meteo API...")
+    response = requests.get(OPENMETEO_API_BASE_URL, params=params, timeout=30)
     response.raise_for_status()
     data = response.json()
 
-    results = data.get("results", [])
-    print(f"Fetched {len(results)} observations")
+    daily = data.get("daily", {})
+    print(f"Fetched weather data for {execution_date}")
 
-    # Aggregate into single record per date
+    # Extract values (Open-Meteo returns arrays, get first element)
+    temp_max = daily.get("temperature_2m_max", [None])[0]
+    temp_min = daily.get("temperature_2m_min", [None])[0]
+    precipitation = daily.get("precipitation_sum", [None])[0]
+    snowfall = daily.get("snowfall_sum", [None])[0]
+    wind_speed = daily.get("wind_speed_10m_max", [None])[0]
+
+    # Determine weather condition
+    snow = snowfall or 0
+    precip = precipitation or 0
+
+    if snow > 0:
+        weather_condition = "snow"
+    elif precip > 0.1:
+        weather_condition = "rain"
+    else:
+        weather_condition = "clear"
+
     weather_record = {
         "observation_date": execution_date,
-        "station_id": BOSTON_STATION_ID,
-        "station_name": "Boston Logan Airport",
-        "precipitation_inches": None,
-        "temp_max_f": None,
-        "temp_min_f": None,
-        "snow_inches": None,
-        "snow_depth_inches": None,
-        "wind_speed_mph": None,
-        "weather_condition": None,
+        "station_id": "openmeteo_boston",
+        "station_name": "Boston (Open-Meteo)",
+        "precipitation_inches": precipitation,
+        "temp_max_f": temp_max,
+        "temp_min_f": temp_min,
+        "snow_inches": snowfall,
+        "snow_depth_inches": None,  # Not available in Open-Meteo
+        "wind_speed_mph": wind_speed,
+        "weather_condition": weather_condition,
         "fetched_at": datetime.utcnow().isoformat()
     }
 
-    for obs in results:
-        datatype = obs.get("datatype")
-        value = obs.get("value")
-
-        if datatype == "PRCP":
-            weather_record["precipitation_inches"] = value
-        elif datatype == "TMAX":
-            weather_record["temp_max_f"] = value
-        elif datatype == "TMIN":
-            weather_record["temp_min_f"] = value
-        elif datatype == "SNOW":
-            weather_record["snow_inches"] = value
-        elif datatype == "SNWD":
-            weather_record["snow_depth_inches"] = value
-        elif datatype == "AWND":
-            weather_record["wind_speed_mph"] = value
-
-    # Categorize weather condition
-    precip = weather_record["precipitation_inches"] or 0
-    snow = weather_record["snow_inches"] or 0
-
-    if snow > 0:
-        weather_record["weather_condition"] = "snow"
-    elif precip > 0.1:
-        weather_record["weather_condition"] = "rain"
-    else:
-        weather_record["weather_condition"] = "clear"
-
-    volume_path = write_to_volume([weather_record], "noaa_weather", execution_date)
+    volume_path = write_to_volume([weather_record], "openmeteo_weather", execution_date)
     return {"records": 1, "volume_path": volume_path}
 
 # COMMAND ----------
@@ -426,7 +415,7 @@ results = {}
 # Ingest all sources
 results["mbta_predictions"] = ingest_mbta_predictions(EXECUTION_DATE)
 results["mbta_schedules"] = ingest_mbta_schedules(EXECUTION_DATE)
-results["noaa_weather"] = ingest_noaa_weather(EXECUTION_DATE)
+results["openmeteo_weather"] = ingest_openmeteo_weather(EXECUTION_DATE)
 results["driving_routes"] = ingest_driving_routes(EXECUTION_DATE)
 
 # COMMAND ----------

@@ -144,22 +144,22 @@ def bronze_mbta_schedules():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Bronze Table: NOAA Weather (Batch)
+# MAGIC ## Bronze Table: Open-Meteo Weather (Batch)
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_noaa_weather",
-    comment="Raw daily weather observations from Boston Logan Airport",
+    name="bronze_openmeteo_weather",
+    comment="Raw daily weather observations from Open-Meteo API for Boston",
     table_properties={
         "quality": "bronze"
     }
 )
 @dlt.expect("valid_observation_date", "observation_date IS NOT NULL")
 @dlt.expect("valid_weather_condition", "weather_condition IN ('clear', 'rain', 'snow')")
-def bronze_noaa_weather():
+def bronze_openmeteo_weather():
     """
-    Ingests NOAA weather data from Volume.
+    Ingests Open-Meteo weather data from Volume.
     Daily batch processing (weather data is released daily).
     """
     schema = StructType([
@@ -180,10 +180,10 @@ def bronze_noaa_weather():
         spark.readStream
         .format("cloudFiles")
         .option("cloudFiles.format", "json")
-        .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/noaa_weather/schema")
+        .option("cloudFiles.schemaLocation", f"{CHECKPOINT_BASE}/openmeteo_weather/schema")
         .option("cloudFiles.inferColumnTypes", "false")
         .schema(schema)
-        .load(f"{VOLUME_BASE_PATH}/noaa_weather/")
+        .load(f"{VOLUME_BASE_PATH}/openmeteo_weather/")
         .withColumn("observation_date", to_date("observation_date"))
         .withColumn("fetched_at", to_timestamp("fetched_at"))
         .withColumn("_ingested_at", current_timestamp())

@@ -36,7 +36,7 @@ def stg_weather_daily():
     Migrated from: dbt_project/models/capstone/staging/stg_weather_daily.sql
     """
     return (
-        dlt.read("bronze_noaa_weather")
+        dlt.read("bronze_openmeteo_weather")
         # Detailed weather categorization
         .withColumn(
             "weather_category_detailed",
