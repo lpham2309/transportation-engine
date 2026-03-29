@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: stg_mbta_performance
+    description: MBTA predictions joined with schedules, enriched with weather data
+    columns:
+      - name: performance_id
+        description: Unique identifier for each prediction-schedule pair
+        tests:
+          - not_null
+
+      - name: delay_seconds
+        description: Delay in seconds (predicted - scheduled arrival)
+        tests:
+          - not_null
+
+      - name: is_on_time
+        description: True if delay <= 5 minutes
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+
+      - name: hour_bucket
+        description: Time period categorization
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['AM_PEAK', 'PM_PEAK', 'MIDDAY', 'OFF_PEAK']
+
+      - name: day_type
+        description: Weekday or weekend
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['weekday', 'weekend']
+
+      - name: weather_condition
+        description: Weather condition on the day
+        tests:
+          - accepted_values:
+              values: ['clear', 'rain', 'snow']
+
+  - name: stg_weather_daily
+    description: Enhanced weather data with severity scoring
+    columns:
+      - name: observation_date
+        description: Date of weather observation
+        tests:
+          - unique
+          - not_null
+
+      - name: weather_condition
+        description: Basic weather category
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['clear', 'rain', 'snow']
+
+      - name: weather_severity_score
+        description: Composite weather severity score (0-100)
+        tests:
+          - not_null
+
+  - name: stg_driving_performance
+    description: Google Maps driving data enriched with weather
+    columns:
+      - name: driving_id
+        description: Unique identifier for each driving observation
+        tests:
+          - unique
+          - not_null
+
+      - name: duration_in_traffic_seconds
+        description: Travel time with traffic
+        tests:
+          - not_null
+
+      - name: traffic_delay_seconds
+        description: Additional time due to traffic
+        tests:
+          - not_null
+
+      - name: hour_bucket
+        description: Time period categorization
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['AM_PEAK', 'PM_PEAK', 'MIDDAY', 'OFF_PEAK']

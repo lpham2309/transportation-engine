@@ -1,0 +1,21 @@
+# =============================================================================
+# Databricks
+# =============================================================================
+databricks-sql-connector>=3.0.0  # Databricks SQL queries
+# Note: Delta Live Tables SDK is pre-installed in Databricks Runtime
+
+# =============================================================================
+# Data Ingestion
+# =============================================================================
+boto3  # AWS S3 operations
+h3  # Uber's H3 hexagonal hierarchical spatial index
+requests  # HTTP client for MBTA, NOAA APIs
+googlemaps==4.10.0  # Google Maps Directions API
+python-dotenv  # Environment variable management
+
+# =============================================================================
+# Routes Management API
+# =============================================================================
+fastapi>=0.110.0  # REST API for route configuration
+uvicorn[standard]>=0.27.0  # ASGI server
+pydantic>=2.0  # Data validation (FastAPI dependency)

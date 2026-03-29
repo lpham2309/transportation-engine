@@ -1,0 +1,9 @@
+snapshots:
+  - name: snapshot_customers
+    relation: source('bootcamp', 'js_raw_customers')
+    config:
+      database: dataexpert_student
+      schema: snapshots
+      strategy: timestamp
+      unique_key: id
+      updated_at: last_updated_dt

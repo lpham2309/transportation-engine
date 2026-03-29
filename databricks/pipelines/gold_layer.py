@@ -16,27 +16,33 @@ from pyspark.sql.window import Window
 # MAGIC %md
 # MAGIC ## Gold Table: fct_mbta_route_reliability
 # MAGIC
-# MAGIC Calculates reliability scores for MBTA routes using the formula:
+# MAGIC TODO: Replace custom formula with industry-standard metrics (FHWA, TCQSM)
+# MAGIC Current formula commented out pending revision:
 # MAGIC `reliability_score = 0.6 * on_time_score + 0.4 * stability_score`
 
 # COMMAND ----------
 
 @dlt.table(
     name="fct_mbta_route_reliability",
-    comment="Reliability scores and metrics for MBTA routes by stratification",
+    comment="Reliability metrics for MBTA routes by stratification",
     table_properties={
         "quality": "gold",
         "pipelines.autoOptimize.zOrderCols": "stop_h3_index,route_id"
     }
 )
-@dlt.expect("valid_reliability_score", "reliability_score BETWEEN 0 AND 100")
-@dlt.expect("sufficient_sample_size", "trip_count >= 30", on_violation="warn")
+# @dlt.expect("valid_reliability_score", "reliability_score BETWEEN 0 AND 100")  # TODO: Re-enable after formula revision
+@dlt.expect("sufficient_sample_size", "trip_count >= 30")  # Logs warning but keeps rows
 def fct_mbta_route_reliability():
     """
-    Calculates reliability scores for MBTA routes.
+    Calculates reliability metrics for MBTA routes.
     Migrated from: dbt_project/models/capstone/marts/fct_mbta_route_reliability.sql
 
-    Reliability Formula:
+    TODO: Replace custom formula with industry-standard metrics:
+    - FHWA Buffer Time Index (BTI)
+    - FHWA Planning Time Index (PTI)
+    - MBTA On-Time Performance (OTP)
+
+    COMMENTED OUT (pending revision):
         reliability_score = 0.6 * on_time_score + 0.4 * stability_score
     Where:
         on_time_score = (on_time_count / trip_count) * 100
@@ -72,37 +78,47 @@ def fct_mbta_route_reliability():
         .filter(col("trip_count") >= 30)  # Minimum sample size
     )
 
-    # Calculate reliability scores
+    # Calculate reliability metrics
     reliability_scores = (
         route_stats
-        # On-time rate and score
+        # On-time rate (keep - this is standard)
         .withColumn(
             "on_time_rate",
             col("on_time_count").cast("double") / col("trip_count")
         )
         .withColumn("on_time_score", col("on_time_rate") * 100)
-        # Stability score: 100 * max(0, 1 - (p95 - p50) / abs(p50))
-        .withColumn(
-            "stability_score",
-            greatest(
-                lit(0.0),
-                lit(100.0) * (
-                    lit(1.0) - (col("p95_delay_sec") - col("p50_delay_sec")).cast("double") /
-                    greatest(abs(col("p50_delay_sec")), lit(0.1))
-                )
-            )
-        )
-        # Final reliability score: 0.6 * on_time + 0.4 * stability
-        .withColumn(
-            "reliability_score",
-            least(
-                lit(100.0),
-                greatest(
-                    lit(0.0),
-                    (lit(0.6) * col("on_time_score")) + (lit(0.4) * col("stability_score"))
-                )
-            )
-        )
+
+        # =========================================================================
+        # TODO: RELIABILITY FORMULA - COMMENTED OUT PENDING REVISION
+        # Replace with industry-standard metrics (FHWA BTI/PTI, TCQSM)
+        # =========================================================================
+        # # Stability score: 100 * max(0, 1 - (p95 - p50) / abs(p50))
+        # .withColumn(
+        #     "stability_score",
+        #     greatest(
+        #         lit(0.0),
+        #         lit(100.0) * (
+        #             lit(1.0) - (col("p95_delay_sec") - col("p50_delay_sec")).cast("double") /
+        #             greatest(abs(col("p50_delay_sec")), lit(0.1))
+        #         )
+        #     )
+        # )
+        # # Final reliability score: 0.6 * on_time + 0.4 * stability
+        # .withColumn(
+        #     "reliability_score",
+        #     least(
+        #         lit(100.0),
+        #         greatest(
+        #             lit(0.0),
+        #             (lit(0.6) * col("on_time_score")) + (lit(0.4) * col("stability_score"))
+        #         )
+        #     )
+        # )
+        # =========================================================================
+
+        # Placeholder columns until formula is finalized
+        .withColumn("stability_score", lit(None).cast("double"))
+        .withColumn("reliability_score", lit(None).cast("double"))
         # Volatility metrics
         .withColumn(
             "transit_volatility_cv",
@@ -159,25 +175,30 @@ def fct_mbta_route_reliability():
 # MAGIC %md
 # MAGIC ## Gold Table: fct_driving_route_reliability
 # MAGIC
-# MAGIC Calculates reliability scores for driving routes using the same formula.
+# MAGIC TODO: Replace custom formula with industry-standard metrics (FHWA BTI/PTI)
+# MAGIC Current formula commented out pending revision.
 
 # COMMAND ----------
 
 @dlt.table(
     name="fct_driving_route_reliability",
-    comment="Reliability scores and metrics for driving routes",
+    comment="Reliability metrics for driving routes",
     table_properties={
         "quality": "gold"
     }
 )
-@dlt.expect("valid_reliability_score", "reliability_score BETWEEN 0 AND 100")
-@dlt.expect("sufficient_sample_size", "trip_count >= 20", on_violation="warn")
+# @dlt.expect("valid_reliability_score", "reliability_score BETWEEN 0 AND 100")  # TODO: Re-enable after formula revision
+@dlt.expect("sufficient_sample_size", "trip_count >= 20")  # Logs warning but keeps rows
 def fct_driving_route_reliability():
     """
-    Calculates reliability scores for driving routes.
+    Calculates reliability metrics for driving routes.
     Migrated from: dbt_project/models/capstone/marts/fct_driving_route_reliability.sql
 
-    Uses same reliability formula but based on duration instead of delay.
+    TODO: Replace custom formula with industry-standard metrics:
+    - FHWA Travel Time Index (TTI)
+    - FHWA Buffer Time Index (BTI)
+    - FHWA Planning Time Index (PTI)
+
     On-time defined as: duration_in_traffic <= baseline_duration + 5 minutes
     """
     driving = (
@@ -215,34 +236,45 @@ def fct_driving_route_reliability():
         .filter(col("trip_count") >= 20)  # Lower threshold than MBTA
     )
 
-    # Calculate reliability scores (same formula as MBTA)
+    # Calculate reliability metrics
     reliability_scores = (
         route_stats
+        # On-time rate (keep - this is standard)
         .withColumn(
             "on_time_rate",
             col("on_time_count").cast("double") / col("trip_count")
         )
         .withColumn("on_time_score", col("on_time_rate") * 100)
-        .withColumn(
-            "stability_score",
-            greatest(
-                lit(0.0),
-                lit(100.0) * (
-                    lit(1.0) - (col("p95_duration_sec") - col("p50_duration_sec")).cast("double") /
-                    greatest(col("p50_duration_sec"), lit(0.1))
-                )
-            )
-        )
-        .withColumn(
-            "reliability_score",
-            least(
-                lit(100.0),
-                greatest(
-                    lit(0.0),
-                    (lit(0.6) * col("on_time_score")) + (lit(0.4) * col("stability_score"))
-                )
-            )
-        )
+
+        # =========================================================================
+        # TODO: RELIABILITY FORMULA - COMMENTED OUT PENDING REVISION
+        # Replace with industry-standard metrics (FHWA TTI/BTI/PTI)
+        # =========================================================================
+        # .withColumn(
+        #     "stability_score",
+        #     greatest(
+        #         lit(0.0),
+        #         lit(100.0) * (
+        #             lit(1.0) - (col("p95_duration_sec") - col("p50_duration_sec")).cast("double") /
+        #             greatest(col("p50_duration_sec"), lit(0.1))
+        #         )
+        #     )
+        # )
+        # .withColumn(
+        #     "reliability_score",
+        #     least(
+        #         lit(100.0),
+        #         greatest(
+        #             lit(0.0),
+        #             (lit(0.6) * col("on_time_score")) + (lit(0.4) * col("stability_score"))
+        #         )
+        #     )
+        # )
+        # =========================================================================
+
+        # Placeholder columns until formula is finalized
+        .withColumn("stability_score", lit(None).cast("double"))
+        .withColumn("reliability_score", lit(None).cast("double"))
         .withColumn(
             "transit_volatility_cv",
             when(

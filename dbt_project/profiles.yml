@@ -1,0 +1,58 @@
+reliability_engine:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: LYWBBPJ-ODB66944
+
+      # User/password auth for local development
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+
+      # Key-pair (RSA) auth: use for production deployment
+      # user: "{{ env_var('SNOWFLAKE_USER') }}"
+      # private_key_path: "{{ env_var('PRIVATE_KEY_PATH') }}"
+      # private_key_passphrase: "{{ env_var('PRIVATE_KEY_PASSPHRASE', '') }}"
+
+      role: ALL_USERS_ROLE
+      database: DATAEXPERT_STUDENT
+      warehouse: COMPUTE_WH
+      schema: "{{ env_var('STUDENT_SCHEMA') }}"
+      threads: 1
+      client_session_keep_alive: False
+      query_tag: "{{ env_var('STUDENT_SCHEMA')}}"
+
+      # optional
+      connect_retries: 0 # default 0
+      connect_timeout: 10 # default: 10
+      retry_on_database_errors: False # default: false
+      retry_all: False  # default: false
+      reuse_connections: True # default: True if client_session_keep_alive is False, otherwise None
+
+    prod:
+      type: snowflake
+      account: LYWBBPJ-ODB66944
+
+      # User/password auth for local development
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+
+      # Key-pair (RSA) auth: use for production deployment
+      # user: "{{ env_var('SNOWFLAKE_USER') }}"
+      # private_key_path: "{{ env_var('PRIVATE_KEY_PATH') }}"
+      # private_key_passphrase: "{{ env_var('PRIVATE_KEY_PASSPHRASE', '') }}"
+
+      role: ALL_USERS_ROLE
+      database: DATAEXPERT_STUDENT
+      warehouse: COMPUTE_WH
+      schema: "{{ env_var('STUDENT_SCHEMA') }}_prod"
+      threads: 1
+      client_session_keep_alive: False
+      query_tag: "{{ env_var('STUDENT_SCHEMA')}}_prod"
+
+      # optional
+      connect_retries: 0 # default 0
+      connect_timeout: 10 # default: 10
+      retry_on_database_errors: False # default: false
+      retry_all: False  # default: false
+      reuse_connections: True # default: True if client_session_keep_alive is False, otherwise None
