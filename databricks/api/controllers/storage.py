@@ -1,35 +1,40 @@
 """
-Storage controller - handles S3 operations for routes.
+Storage controller - handles Volume operations for routes.
 """
 import os
 import json
 from typing import List
 from datetime import datetime
+from pathlib import Path
 
-import boto3
 from dotenv import load_dotenv
 
 load_dotenv()
 
-S3_BUCKET = os.getenv("S3_BUCKET", "boston-reliability-engine")
-ROUTES_KEY = "config/driving_routes.json"
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-s3_client = boto3.client("s3", region_name=AWS_REGION)
+# Databricks Volume Configuration
+VOLUME_PATH = os.getenv(
+    "VOLUME_PATH",
+    "/Volumes/bootcamp_students/zachy_lam_pham3110/boston-reliability-engine"
+)
+ROUTES_CONFIG_PATH = f"{VOLUME_PATH}/config/driving_routes.json"
 
 
 def load_routes() -> List[dict]:
     """
-    Load routes from S3.
+    Load routes from Databricks Volume.
 
     Returns:
         List of route dictionaries
     """
     try:
-        response = s3_client.get_object(Bucket=S3_BUCKET, Key=ROUTES_KEY)
-        data = json.loads(response["Body"].read().decode("utf-8"))
+        config_path = Path(ROUTES_CONFIG_PATH)
+        if not config_path.exists():
+            return []
+
+        with open(config_path, "r") as f:
+            data = json.load(f)
         return data.get("routes", [])
-    except s3_client.exceptions.NoSuchKey:
+    except FileNotFoundError:
         return []
     except Exception as e:
         print(f"Error loading routes: {e}")
@@ -38,7 +43,7 @@ def load_routes() -> List[dict]:
 
 def save_routes(routes: List[dict]) -> bool:
     """
-    Save routes to S3.
+    Save routes to Databricks Volume.
 
     Args:
         routes: List of route dictionaries to save
@@ -47,16 +52,19 @@ def save_routes(routes: List[dict]) -> bool:
         True if successful, False otherwise
     """
     try:
+        config_path = Path(ROUTES_CONFIG_PATH)
+
+        # Ensure parent directory exists
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
         data = {
             "routes": routes,
             "updated_at": datetime.utcnow().isoformat()
         }
-        s3_client.put_object(
-            Bucket=S3_BUCKET,
-            Key=ROUTES_KEY,
-            Body=json.dumps(data, indent=2),
-            ContentType="application/json"
-        )
+
+        with open(config_path, "w") as f:
+            json.dump(data, f, indent=2)
+
         return True
     except Exception as e:
         print(f"Error saving routes: {e}")
