@@ -1,6 +1,7 @@
 # Databricks notebook source
 # DBTITLE 1,Cell 1
 # MAGIC %pip install h3
+# MAGIC %pip install googlemaps
 
 # COMMAND ----------
 
