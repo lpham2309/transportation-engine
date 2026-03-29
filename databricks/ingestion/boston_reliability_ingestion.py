@@ -1,5 +1,17 @@
 # Databricks notebook source
+# DBTITLE 1,Cell 1
+# MAGIC %pip install h3
+
+# COMMAND ----------
+
 # MAGIC %md
+# MAGIC ## Configuration
+
+# COMMAND ----------
+
+# DBTITLE 1,Cell 3
+# MAGIC %md
+# MAGIC    
 # MAGIC # Boston Reliability Engine - Data Ingestion
 # MAGIC
 # MAGIC This notebook fetches data from external APIs and writes to Databricks Volume for DLT processing.
@@ -13,11 +25,7 @@
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ## Configuration
-
-# COMMAND ----------
-
+# DBTITLE 1,Cell 4
 import os
 import json
 import requests
@@ -246,7 +254,7 @@ def ingest_noaa_weather(execution_date: str) -> dict:
     }
 
     print("Fetching weather data from NOAA API...")
-    response = requests.get(url, headers=headers, params=params, timeout=30)
+    response = requests.get(url, headers=headers, params=params, timeout=60)
     response.raise_for_status()
     data = response.json()
 
