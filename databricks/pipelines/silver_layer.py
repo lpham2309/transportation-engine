@@ -317,3 +317,115 @@ def stg_driving_performance():
     )
 
     return result
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Quarantine Tables
+# MAGIC
+# MAGIC Tables to capture records that fail data quality checks for auditing and remediation.
+
+# COMMAND ----------
+
+@dlt.table(
+    name="stg_weather_daily_quarantine",
+    comment="Quarantine table for weather records failing data quality checks",
+    table_properties={
+        "quality": "quarantine"
+    }
+)
+def stg_weather_daily_quarantine():
+    """
+    Captures weather records that fail data quality validation.
+    Records with NULL observation_date or invalid weather_condition.
+    """
+    return (
+        dlt.read("bronze_openmeteo_weather")
+        .filter(
+            col("observation_date").isNull() |
+            ~col("weather_condition").isin("clear", "rain", "snow")
+        )
+        .withColumn("quarantine_reason",
+            when(col("observation_date").isNull(), "null_observation_date")
+            .when(~col("weather_condition").isin("clear", "rain", "snow"), "invalid_weather_condition")
+            .otherwise("unknown")
+        )
+        .withColumn("quarantined_at", current_timestamp())
+    )
+
+# COMMAND ----------
+
+@dlt.table(
+    name="stg_mbta_performance_quarantine",
+    comment="Quarantine table for MBTA performance records failing data quality checks",
+    table_properties={
+        "quality": "quarantine"
+    }
+)
+def stg_mbta_performance_quarantine():
+    """
+    Captures MBTA performance records that fail data quality validation.
+    Records where join fails or delay_seconds/scheduled_arrival is NULL.
+    """
+    predictions = dlt.read_stream("bronze_mbta_predictions").alias("p")
+    schedules = dlt.read("bronze_mbta_schedules").alias("s")
+
+    # Left join to find predictions without matching schedules
+    joined = (
+        predictions
+        .join(
+            schedules,
+            (col("p.trip_id") == col("s.trip_id")) &
+            (col("p.stop_id") == col("s.stop_id")),
+            "left"
+        )
+    )
+
+    # Capture records that would be dropped
+    return (
+        joined
+        .filter(
+            col("s.arrival_time").isNull() |
+            col("p.arrival_time").isNull() |
+            col("s.schedule_id").isNull()  # No matching schedule found
+        )
+        .withColumn("quarantine_reason",
+            when(col("s.schedule_id").isNull(), "no_matching_schedule")
+            .when(col("s.arrival_time").isNull(), "null_scheduled_arrival")
+            .when(col("p.arrival_time").isNull(), "null_predicted_arrival")
+            .otherwise("unknown")
+        )
+        .withColumn("quarantined_at", current_timestamp())
+        .select(
+            col("p.prediction_id").alias("prediction_id"),
+            col("p.trip_id").alias("trip_id"),
+            col("p.stop_id").alias("stop_id"),
+            col("p.route_id").alias("route_id"),
+            col("p.arrival_time").alias("predicted_arrival"),
+            col("s.arrival_time").alias("scheduled_arrival"),
+            col("p.fetched_at").alias("fetched_at"),
+            "quarantine_reason",
+            "quarantined_at"
+        )
+    )
+
+# COMMAND ----------
+
+@dlt.table(
+    name="stg_driving_performance_quarantine",
+    comment="Quarantine table for driving records failing data quality checks",
+    table_properties={
+        "quality": "quarantine"
+    }
+)
+def stg_driving_performance_quarantine():
+    """
+    Captures driving records that fail data quality validation.
+    Records with NULL duration_in_traffic_seconds.
+    """
+    return (
+        dlt.read_stream("bronze_driving_routes")
+        .filter(col("duration_in_traffic_seconds").isNull())
+        .withColumn("quarantine_reason", lit("null_duration_in_traffic"))
+        .withColumn("quarantined_at", current_timestamp())
+    )

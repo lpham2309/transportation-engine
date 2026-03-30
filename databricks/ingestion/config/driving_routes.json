@@ -1,0 +1,26 @@
+{
+  "routes": [
+    {
+      "name": "Davis Square to Harvard Square",
+      "description": "Comparable to MBTA Red Line (Davis -> Harvard)",
+      "mbta_route_id": "Red",
+      "origin": {
+        "name": "Davis Station",
+        "latitude": 42.3967,
+        "longitude": -71.1225,
+        "mbta_stop_id": "place-davis"
+      },
+      "destination": {
+        "name": "Harvard Square",
+        "latitude": 42.3736,
+        "longitude": -71.1190,
+        "mbta_stop_id": "place-harsq"
+      },
+      "is_active": true
+    }
+  ],
+  "metadata": {
+    "description": "Driving routes configured for comparison with MBTA transit",
+    "version": "1.0"
+  }
+}

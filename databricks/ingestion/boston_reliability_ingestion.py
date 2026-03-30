@@ -306,31 +306,65 @@ def ingest_openmeteo_weather(execution_date: str) -> dict:
 
 # COMMAND ----------
 
-def load_driving_routes() -> list:
-    """Load driving routes from Volume configuration."""
-    config_path = f"{VOLUME_PATH}/config/driving_routes.json"
+# Local config file path (relative to this notebook)
+# This file is used as fallback if no config exists in Volume
+LOCAL_CONFIG_PATH = "config/driving_routes.json"
 
+# Volume config path (persisted config that can be modified without code changes)
+VOLUME_CONFIG_PATH = f"{VOLUME_PATH}/config/driving_routes.json"
+
+
+def load_driving_routes() -> list:
+    """
+    Load driving routes configuration.
+
+    Priority:
+    1. Load from Volume config if it exists
+    2. If not, load from local config file and upload to Volume for future use
+    """
+    # Try to load from Volume first
     try:
-        content = dbutils.fs.head(config_path, 1000000)
+        content = dbutils.fs.head(VOLUME_CONFIG_PATH, 1000000)
         data = json.loads(content)
         routes = [r for r in data.get("routes", []) if r.get("is_active", True)]
-        print(f"Loaded {len(routes)} routes from config")
+        print(f"Loaded {len(routes)} routes from Volume: {VOLUME_CONFIG_PATH}")
         return routes
     except Exception as e:
-        print(f"No routes config found, using defaults: {e}")
-        # Default routes
-        return [
-            {
-                "name": "Cambridge to Financial District",
-                "origin": {"latitude": 42.3601, "longitude": -71.0589},
-                "destination": {"latitude": 42.3554, "longitude": -71.0603}
-            },
-            {
-                "name": "Harvard to Back Bay",
-                "origin": {"latitude": 42.3736, "longitude": -71.1097},
-                "destination": {"latitude": 42.3601, "longitude": -71.0589}
-            }
-        ]
+        print(f"No config found in Volume: {e}")
+
+    # Fallback: Load from local config file
+    print(f"Loading from local config: {LOCAL_CONFIG_PATH}")
+    try:
+        # Get the directory of the current notebook/script
+        import os
+        notebook_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else "/Workspace/Repos"
+        local_file_path = os.path.join(notebook_dir, LOCAL_CONFIG_PATH)
+
+        # In Databricks, read from workspace files
+        with open(local_file_path, "r") as f:
+            local_config = json.load(f)
+    except Exception:
+        # Fallback for Databricks notebook environment
+        try:
+            local_content = dbutils.fs.head(f"file:{LOCAL_CONFIG_PATH}", 1000000)
+            local_config = json.loads(local_content)
+        except Exception as local_error:
+            print(f"Error loading local config: {local_error}")
+            return []
+
+    # Upload local config to Volume for future use
+    try:
+        local_config["metadata"] = local_config.get("metadata", {})
+        local_config["metadata"]["uploaded_at"] = datetime.utcnow().isoformat()
+        config_content = json.dumps(local_config, indent=2)
+        dbutils.fs.put(VOLUME_CONFIG_PATH, config_content, overwrite=True)
+        print(f"Uploaded local config to Volume: {VOLUME_CONFIG_PATH}")
+    except Exception as upload_error:
+        print(f"Warning: Could not upload config to Volume: {upload_error}")
+
+    routes = [r for r in local_config.get("routes", []) if r.get("is_active", True)]
+    print(f"Using {len(routes)} routes from local config")
+    return routes
 
 def ingest_driving_routes(execution_date: str) -> dict:
     """Fetch Google Maps driving times for configured routes."""

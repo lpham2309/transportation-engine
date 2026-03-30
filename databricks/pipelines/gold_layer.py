@@ -565,3 +565,102 @@ def fct_weather_impact():
     )
 
     return result
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Quarantine Tables
+# MAGIC
+# MAGIC Tables to capture records that fail data quality checks (insufficient sample size).
+
+# COMMAND ----------
+
+@dlt.table(
+    name="fct_mbta_route_reliability_quarantine",
+    comment="Quarantine table for MBTA route aggregations with insufficient sample size",
+    table_properties={
+        "quality": "quarantine"
+    }
+)
+def fct_mbta_route_reliability_quarantine():
+    """
+    Captures MBTA route aggregations that fail the minimum sample size requirement.
+    Records with trip_count < 30 are quarantined for review.
+    """
+    performance = (
+        dlt.read("stg_mbta_performance")
+        .filter(col("delay_seconds").isNotNull())
+    )
+
+    # Aggregate by stratification dimensions
+    route_stats = (
+        performance
+        .groupBy(
+            "stop_h3_index",
+            "route_id",
+            "route_long_name",
+            "hour_bucket",
+            "day_type",
+            "weather_condition"
+        )
+        .agg(
+            count("*").alias("trip_count"),
+            expr("percentile_approx(delay_seconds, 0.50)").alias("p50_delay_sec"),
+            avg("delay_seconds").alias("mean_delay_sec"),
+            sum(when(col("is_on_time"), 1).otherwise(0)).alias("on_time_count")
+        )
+        .filter(col("trip_count") < 30)  # Below minimum sample size
+    )
+
+    return (
+        route_stats
+        .withColumn("quarantine_reason", lit("insufficient_sample_size"))
+        .withColumn("min_required_trips", lit(30))
+        .withColumn("quarantined_at", current_timestamp())
+    )
+
+# COMMAND ----------
+
+@dlt.table(
+    name="fct_driving_route_reliability_quarantine",
+    comment="Quarantine table for driving route aggregations with insufficient sample size",
+    table_properties={
+        "quality": "quarantine"
+    }
+)
+def fct_driving_route_reliability_quarantine():
+    """
+    Captures driving route aggregations that fail the minimum sample size requirement.
+    Records with trip_count < 20 are quarantined for review.
+    """
+    driving = (
+        dlt.read("stg_driving_performance")
+        .filter(col("duration_in_traffic_seconds").isNotNull())
+    )
+
+    # Aggregate by stratification dimensions
+    route_stats = (
+        driving
+        .groupBy(
+            "origin_h3_index",
+            "destination_h3_index",
+            "route_name",
+            "hour_bucket",
+            "day_type",
+            "weather_condition"
+        )
+        .agg(
+            count("*").alias("trip_count"),
+            expr("percentile_approx(duration_in_traffic_seconds, 0.50)").alias("p50_duration_sec"),
+            avg("duration_in_traffic_seconds").alias("mean_duration_sec"),
+            avg("traffic_delay_seconds").alias("avg_traffic_delay_sec")
+        )
+        .filter(col("trip_count") < 20)  # Below minimum sample size
+    )
+
+    return (
+        route_stats
+        .withColumn("quarantine_reason", lit("insufficient_sample_size"))
+        .withColumn("min_required_trips", lit(20))
+        .withColumn("quarantined_at", current_timestamp())
+    )
