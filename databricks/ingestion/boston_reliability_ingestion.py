@@ -1,7 +1,7 @@
 # Databricks notebook source
 # DBTITLE 1,Cell 1
-# MAGIC %pip install h3
-# MAGIC %pip install googlemaps
+# MAGIC %pip install h3==4.4.2
+# MAGIC %pip install googlemaps==4.10.0
 
 # COMMAND ----------
 
